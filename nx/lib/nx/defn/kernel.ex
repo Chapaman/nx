@@ -1675,15 +1675,12 @@ defmodule Nx.Defn.Kernel do
   This operation concatenates tensors from multiple replicas/devices along
   the specified dimension. Requires a backend that supports multi-device operations.
 
-  The operation accepts tensor containers and keyword options for configuration.
-  Then, it traverses the container and applies the all_gather operation to each tensor.
+  The operation accepts a tensor and keyword options for configuration.
 
   """
-  def all_gather(container, opts \\ []) do
+  def all_gather(tensor, opts) do
     __defn__!(:all_gather, 2)
-    Nx.Defn.Composite.traverse(container, fn tensor ->
-      Nx.Defn.Expr.all_gather(tensor, opts)
-    end)
+    Nx.Defn.Expr.all_gather(tensor, opts)
   end
 
   @definitions (Module.definitions_in(__MODULE__, :def) ++
