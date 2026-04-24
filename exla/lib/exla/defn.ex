@@ -600,6 +600,132 @@ defmodule EXLA.Defn do
     {fun_computation(args, expr, type, state), cache}
   end
 
+  # StableHLO-style lowering (gather, top_k, fft): not the C custom_call path;
+  # see `EXLA.CustomCall` for blocks that delegate to native CPU kernels.
+
+  defp cached_recur_operator(
+         :block,
+         %T{
+           data: %Expr{
+             args: [%Nx.Block.Take{axis: axis}, [tensor, indices], expr, _callback]
+           }
+         },
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+    {indices, cache} = recur_operator(indices, state, cache) |> unwrap_single_tensor!()
+
+    tensor_rank = tensor |> op_shape() |> tuple_size()
+    indices_rank = indices |> op_shape() |> tuple_size()
+    result_rank = tensor_rank - 1 + indices_rank
+
+    index_vector_dim = indices_rank
+    slice_sizes = tensor |> op_shape() |> put_elem(axis, 1) |> Tuple.to_list()
+
+    {left, right} = result_rank |> axes_for_rank() |> Enum.split(axis)
+    offset_dims = left ++ Enum.drop(right, indices_rank)
+
+    collapsed_slice_dims = [axis]
+    start_index_map = [axis]
+
+    result =
+      Value.gather(
+        tensor,
+        indices,
+        index_vector_dim,
+        slice_sizes,
+        offset_dims,
+        collapsed_slice_dims,
+        start_index_map,
+        expr_to_typespec(expr)
+      )
+
+    {result, cache}
+  end
+
+  defp cached_recur_operator(
+         :block,
+         %T{data: %Expr{args: [%Nx.Block.TopK{k: k}, [tensor], expr, _callback]}},
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+    {values, idx} = expr
+    typespecs = [expr_to_typespec(values), expr_to_typespec(idx)]
+    results = Value.top_k(tensor, k, typespecs)
+    {results, cache}
+  end
+
+  defp cached_recur_operator(
+         :block,
+         %T{data: %Expr{args: [%Nx.Block.FFT2{} = fft2_struct, [tensor], expr, _callback]}},
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+
+    opts = [lengths: fft2_struct.lengths, axes: fft2_struct.axes]
+    opts = if eps = fft2_struct.eps, do: Keyword.put(opts, :eps, eps), else: opts
+
+    {fft2(&Value.fft(&1, :fft, &2, &3), [tensor, opts], expr), cache}
+  end
+
+  defp cached_recur_operator(
+         :block,
+         %T{data: %Expr{args: [%Nx.Block.IFFT2{} = ifft2_struct, [tensor], expr, _callback]}},
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+
+    opts = [lengths: ifft2_struct.lengths, axes: ifft2_struct.axes]
+    opts = if eps = ifft2_struct.eps, do: Keyword.put(opts, :eps, eps), else: opts
+
+    {fft2(&Value.fft(&1, :ifft, &2, &3), [tensor, opts], expr), cache}
+  end
+
+  defp cached_recur_operator(
+         :block,
+         %T{data: %Expr{args: [%Nx.Block.RFFT{} = rfft_struct, [tensor], expr, _callback]}},
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+
+    opts = [length: rfft_struct.length, axis: rfft_struct.axis]
+    opts = if eps = rfft_struct.eps, do: Keyword.put(opts, :eps, eps), else: opts
+
+    input_type = Nx.Type.to_real(expr.type)
+
+    {fft(&Value.fft(&1, :rfft, &2, &3), input_type, expr.type, [tensor, opts], expr), cache}
+  end
+
+  defp cached_recur_operator(
+         :block,
+         %T{data: %Expr{args: [%Nx.Block.IRFFT{} = irfft_struct, [tensor], expr, _callback]}},
+         state,
+         cache
+       ) do
+    {tensor, cache} = recur_operator(tensor, state, cache) |> unwrap_single_tensor!()
+
+    opts = [length: irfft_struct.length, axis: irfft_struct.axis]
+    opts = if eps = irfft_struct.eps, do: Keyword.put(opts, :eps, eps), else: opts
+
+    n = irfft_struct.length
+    input_type = Nx.Type.to_complex(expr.type)
+
+    {fft(
+       &Value.fft(&1, :irfft, &2, &3),
+       input_type,
+       expr.type,
+       div(n, 2) + 1,
+       [tensor, opts],
+       expr
+     ), cache}
+  end
+
+  # C-backed custom_call blocks (QR, Eigh, …): `EXLA.CustomCall`; else compile default callback.
   defp cached_recur_operator(
          :block,
          %T{data: %Expr{args: [struct, in_args, out, _callback]}},
