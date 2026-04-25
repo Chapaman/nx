@@ -785,6 +785,23 @@ defmodule EXLA.MLIR.Value do
     {q, r}
   end
 
+  @doc false
+  def qr_with_call_target(%Value{function: func} = value, q_typespec, r_typespec, call_target_name)
+      when is_binary(call_target_name) do
+    operands = [value]
+    result_types = typespecs_to_mlir_types([q_typespec, r_typespec])
+
+    attributes = [
+      call_target_name: attr_string(call_target_name),
+      api_version: attr_i32(4)
+    ]
+
+    [q, r] =
+      op(func, "stablehlo.custom_call", operands, result_types, attributes: attributes)
+
+    {q, r}
+  end
+
   def lu(%Value{function: func} = value, p_typespec, l_typespec, u_typespec) do
     %{type: op_type} = get_typespec(value)
 

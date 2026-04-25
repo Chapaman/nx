@@ -86,6 +86,21 @@ else
 	LDFLAGS += -Wl,-rpath,'$$ORIGIN/xla_extension/lib'
 endif
 
+# Optional test plugin: registers qr_cpu_custom_call_f32_exla_alias -> same
+# handler as qr_cpu_custom_call_f32 (Mix sets BUILD_EXLA_TEST_PLUGIN=1 in :test).
+TEST_PLUGIN_CC = c_src/exla_test_plugin/qr_alias_registration.cc
+TEST_PLUGIN_SO = $(PRIV_DIR)/test/exla_qr_alias_plugin.so
+
+ifneq ($(BUILD_EXLA_TEST_PLUGIN),)
+ifneq ($(BUILD_EXLA_TEST_PLUGIN),0)
+$(EXLA_SO): $(TEST_PLUGIN_SO)
+endif
+endif
+
+$(TEST_PLUGIN_SO): $(TEST_PLUGIN_CC) | $(XLA_EXTENSION_DIR)
+	@ mkdir -p $(dir $@)
+	$(CXX) $(CFLAGS) -shared $(TEST_PLUGIN_CC) -o $@ $(LDFLAGS)
+
 $(EXLA_SO): $(EXLA_CACHE_SO)
 	@ mkdir -p $(PRIV_DIR)
 	@ mkdir -p $(PRIV_DIR)/xla_extension

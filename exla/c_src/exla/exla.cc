@@ -1,3 +1,5 @@
+#include <dlfcn.h>
+
 #include <cstring>
 #include <fine.hpp>
 #include <stdexcept>
@@ -534,6 +536,20 @@ fine::Ok<> load_pjrt_plugin(ErlNifEnv *env, std::string device_type,
 }
 
 FINE_NIF(load_pjrt_plugin, 0);
+
+// Loads a shared library with RTLD_GLOBAL so XLA FFI static registrations run.
+// Used from tests (e.g. alias custom-call registration plugin).
+fine::Ok<> dlopen_test_plugin(ErlNifEnv *env, std::string path) {
+  void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+  if (handle == nullptr) {
+    const char *err = dlerror();
+    throw std::invalid_argument(err ? err : "dlopen failed");
+  }
+  (void)handle;
+  return fine::Ok();
+}
+
+FINE_NIF(dlopen_test_plugin, 0);
 
 int64_t get_device_count(ErlNifEnv *env, fine::ResourcePtr<ExlaClient> client) {
   return client->client()->device_count();
