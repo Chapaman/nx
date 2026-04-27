@@ -786,7 +786,12 @@ defmodule EXLA.MLIR.Value do
   end
 
   @doc false
-  def qr_with_call_target(%Value{function: func} = value, q_typespec, r_typespec, call_target_name)
+  def qr_with_call_target(
+        %Value{function: func} = value,
+        q_typespec,
+        r_typespec,
+        call_target_name
+      )
       when is_binary(call_target_name) do
     operands = [value]
     result_types = typespecs_to_mlir_types([q_typespec, r_typespec])
