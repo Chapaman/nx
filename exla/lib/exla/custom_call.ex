@@ -1,40 +1,101 @@
 defprotocol EXLA.CustomCall do
   @moduledoc """
-  Protocol used by `EXLA.Defn` to lower specific `Nx.block/4` tags that are
-  implemented as **XLA/StableHLO custom calls into native (C/C++) code** —
-  the same pipeline as `EXLA.MLIR.Value` helpers such as `qr/3` and `eigh/3`.
+  Extension point for lowering selected `Nx.block/4` tags to **XLA custom calls**
+  (`stablehlo.custom_call` in MLIR), the same style as helpers on
+  `EXLA.MLIR.Value` such as `qr/3` and `eigh/3`.
 
-  Other blocks (for example gather-based take or plain StableHLO FFT) stay
-  inlined in `EXLA.Defn` so this protocol stays focused on what those paths
-  share: `stablehlo.custom_call` plus registration of the callee.
+  Other blocks (for example gather-based `take` or FFT) are lowered inline in
+  `EXLA.Defn` and do not use this protocol.
 
-  Implementations receive the block tag struct, the output template (`out`),
-  the already-recursed MLIR `EXLA.MLIR.Value` arguments and the active
-  `EXLA.Client`.
+  ## When `EXLA.Defn` calls it
 
-  Built-in lowerings for those tags live in a single `defimpl ..., for: Any`
-  module (see comment there). Applications and libraries can still supply a
-  **more specific** `defimpl EXLA.CustomCall, for: TheirStruct` — Elixir will
-  use that instead of the `Any` fallback when the block tag matches.
+  During compilation with `compiler: EXLA`, when the builder is an MLIR
+  `EXLA.MLIR.Function`, each `Nx.block(tag, inputs, outputs, fn ... end)` is
+  passed here: `EXLA.Defn` invokes `call(tag, outputs_template, lowered_inputs, client)`.
+
+  If `call/4` returns `:skip`, EXLA compiles the block's **default callback**
+  (the anonymous function body) instead of emitting a custom call.
+
+  ## `call/4` arguments
+
+    * `struct` — the **tag** passed as the first argument to `Nx.block/4`
+      (your own `defstruct` or an existing tag such as `%Nx.Block.LinAlg.QR{}`).
+
+    * `out` — the **output template** tuple passed to `Nx.block/4` (expression
+      metadata for shapes and types, not runtime tensors).
+
+    * `args` — list of already-lowered **operands** as `EXLA.MLIR.Value`s, in
+      the same order as `inputs` in `Nx.block/4`.
+
+    * `client` — the active `EXLA.Client` (use e.g. `client.platform` to gate
+      host-only lowerings).
+
+  ## Return value
+
+    * **Success** — return a list of `EXLA.MLIR.Value` (or a single value) that
+      matches the block result shape implied by `out`.
+
+    * **`:skip`** — this implementation does not apply (unsupported type,
+      non-host platform, wrong arity, etc.). The default block implementation is
+      used instead.
+
+  ## Dispatch
+
+  The protocol uses `@fallback_to_any true`. Built-in lowerings for known tags
+  live in `defimpl EXLA.CustomCall, for: Any`. Your application or dependency can
+  add `defimpl EXLA.CustomCall, for: YourStruct`; that implementation is chosen
+  whenever the block tag is `%YourStruct{}`, instead of the `Any` fallback.
+
+  ## Native handlers
+
+  Emitting a custom call in MLIR is only half of the story: the **target name**
+  must be registered with XLA on the relevant platform (typically via a native
+  library loaded into the process). That registration is **not** configured
+  through `config :exla, ...`; you load or link the native code by the same
+  means you would for any other NIF-backed extension.
+
+  ## Example
+
+      defmodule MyApp.CustomQrTag do
+        defstruct []
+      end
+
+      defimpl EXLA.CustomCall, for: MyApp.CustomQrTag do
+        alias EXLA.Defn
+        alias EXLA.MLIR.Value
+
+        def call(_tag, {q_expr, r_expr}, [tensor], %{platform: :host}) do
+          tensor =
+            if Defn.op_type(tensor) != q_expr.type do
+              Defn.to_type(tensor, q_expr.type)
+            else
+              tensor
+            end
+
+          {q, r} =
+            Value.qr(tensor, Defn.expr_to_typespec(q_expr), Defn.expr_to_typespec(r_expr))
+
+          [q, r]
+        end
+
+        def call(_, _, _, _), do: :skip
+      end
+
+  Then use `Nx.block(%MyApp.CustomQrTag{}, ...)` inside a `defn` compiled with
+  `compiler: EXLA`.
   """
 
   @fallback_to_any true
 
   @doc """
-  Returns `true` when EXLA should lower the block natively via `call/4`.
+  Attempts to lower the block natively.
 
-  When it returns `false`, `EXLA.Defn` falls back to compiling the block's
-  default callback implementation.
-  """
-  def apply?(struct, out, args, client)
+  Returns a list of `EXLA.MLIR.Value`s (or a single value) that represents the
+  block result, matching the shape of `out`.
 
-  @fallback_to_any true
-
-  @doc """
-  Lowers the block natively.
-
-  Must return the list of `EXLA.MLIR.Value`s (or a single value) that
-  represents the block result, matching the shape of `out`.
+  Returns `:skip` when this implementation does not apply (wrong types,
+  platform, arity, etc.). `EXLA.Defn` then compiles the block's default callback
+  instead.
   """
   def call(struct, out, args, client)
 end
@@ -47,34 +108,13 @@ end
 # also target a built-in struct such as `Nx.Block...` from your app if needed).
 #
 defimpl EXLA.CustomCall, for: Any do
+  @moduledoc false
+
   alias EXLA.MLIR.Value
   alias EXLA.Defn
 
-  # --- apply?/4 ---
-
-  def apply?(
-        %Nx.Block.LinAlg.QR{},
-        {%{type: {q_type_kind, _}}, _r},
-        _args,
-        client
-      ) do
-    q_type_kind != :c and client.platform == :host
-  end
-
-  def apply?(
-        %Nx.Block.LinAlg.Eigh{},
-        {%{type: {eval_type_kind, _}}, %{type: {evec_type_kind, _}}},
-        _args,
-        client
-      ) do
-    eval_type_kind != :c and evec_type_kind != :c and client.platform == :host
-  end
-
-  def apply?(_, _, _, _), do: false
-
-  # --- call/4 ---
-
-  def call(%Nx.Block.LinAlg.QR{}, {q_expr, r_expr}, [tensor], _client) do
+  def call(%Nx.Block.LinAlg.QR{}, {%{type: {q_type_kind, _}} = q_expr, r_expr}, [tensor], client)
+      when q_type_kind != :c and client.platform == :host do
     tensor =
       if Defn.op_type(tensor) != q_expr.type do
         Defn.to_type(tensor, q_expr.type)
@@ -88,10 +128,12 @@ defimpl EXLA.CustomCall, for: Any do
 
   def call(
         %Nx.Block.LinAlg.Eigh{},
-        {eigenvals_expr, eigenvecs_expr},
+        {%{type: {eval_type_kind, _}} = eigenvals_expr,
+         %{type: {evec_type_kind, _}} = eigenvecs_expr},
         [tensor],
-        _client
-      ) do
+        client
+      )
+      when eval_type_kind != :c and evec_type_kind != :c and client.platform == :host do
     # Eigen only supports f32/f64, so promote to the smallest floating type
     # wide enough to represent the requested output.
     out_type = Nx.Type.merge(Nx.Type.to_floating(eigenvecs_expr.type), {:f, 32})
@@ -116,9 +158,7 @@ defimpl EXLA.CustomCall, for: Any do
     ]
   end
 
-  def call(struct, _out, _args, _client) do
-    raise ArgumentError,
-          "EXLA.CustomCall.call/4 is not implemented for #{inspect(struct)}. " <>
-            "Did you forget to guard with EXLA.CustomCall.apply?/4?"
-  end
+  def call(%Nx.Block.LinAlg.QR{}, _, _, _), do: :skip
+  def call(%Nx.Block.LinAlg.Eigh{}, _, _, _), do: :skip
+  def call(_, _, _, _), do: :skip
 end

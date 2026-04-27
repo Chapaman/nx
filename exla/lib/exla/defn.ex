@@ -734,10 +734,12 @@ defmodule EXLA.Defn do
        ) do
     {call_args, cache} = Enum.map_reduce(in_args, cache, &recur_operator(&1, state, &2))
 
-    if EXLA.CustomCall.apply?(struct, out, call_args, client) do
-      {EXLA.CustomCall.call(struct, out, call_args, client), cache}
-    else
-      default_block_implementation(struct, call_args, out, state, cache)
+    case EXLA.CustomCall.call(struct, out, call_args, client) do
+      :skip ->
+        default_block_implementation(struct, call_args, out, state, cache)
+
+      lowered ->
+        {lowered, cache}
     end
   end
 
