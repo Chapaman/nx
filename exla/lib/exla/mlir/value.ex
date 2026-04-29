@@ -719,23 +719,25 @@ defmodule EXLA.MLIR.Value do
     op(func, "stablehlo.return", values, [])
   end
 
-  def eigh(%Value{function: func} = value, eigenvals_typespec, eigenvecs_typespec) do
+  def eigh(
+        %Value{function: func} = value,
+        %{type: eval_type} = eigenvals_typespec,
+        %{type: evec_type} = eigenvecs_typespec
+      ) do
     %{type: op_type} = get_typespec(value)
 
     operands = [value]
     result_types = typespecs_to_mlir_types([eigenvals_typespec, eigenvecs_typespec])
 
+    computation_type = Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})
+
     call_target_name =
-      case op_type do
-        {:f, 32} ->
-          "eigh_cpu_custom_call_f32"
+      case EXLA.CustomCall.Builtins.eigh_cpu_target(op_type, computation_type) do
+        :skip ->
+          raise "Eigh decomposition not supported on :host device for operand type #{inspect(op_type)}, eigenvalue type #{inspect(eval_type)}, eigenvector type #{inspect(evec_type)}"
 
-        {:f, 64} ->
-          "eigh_cpu_custom_call_f64"
-
-        type ->
-          # Due to matching on EXLA.Defn, we are sure that the device here is always :host
-          raise "Eigh decomposition not supported on :host device for type #{inspect(type)}"
+        name when is_binary(name) ->
+          name
       end
 
     attributes = [
@@ -749,29 +751,19 @@ defmodule EXLA.MLIR.Value do
     {eigenvals, eigenvecs}
   end
 
-  def qr(%Value{function: func} = value, q_typespec, r_typespec) do
+  def qr(%Value{function: func} = value, %{type: q_type} = q_typespec, r_typespec) do
     %{type: op_type} = get_typespec(value)
 
     operands = [value]
     result_types = typespecs_to_mlir_types([q_typespec, r_typespec])
 
     call_target_name =
-      case op_type do
-        {:f, 32} ->
-          "qr_cpu_custom_call_f32"
+      case EXLA.CustomCall.Builtins.qr_cpu_target(op_type, q_type) do
+        :skip ->
+          raise "QR decomposition not supported on :host device for operand type #{inspect(op_type)} and Q type #{inspect(q_type)}"
 
-        {:f, 64} ->
-          "qr_cpu_custom_call_f64"
-
-        {:f, 16} ->
-          "qr_cpu_custom_call_f16"
-
-        {:bf, 16} ->
-          "qr_cpu_custom_call_bf16"
-
-        type ->
-          # Due to matching on EXLA.Defn, we are sure that the device here is always :host
-          raise "QR decomposition not supported on :host device for type #{inspect(type)}"
+        name when is_binary(name) ->
+          name
       end
 
     attributes = [

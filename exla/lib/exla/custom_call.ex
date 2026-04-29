@@ -94,6 +94,58 @@ defprotocol EXLA.CustomCall do
   def config(struct, out, args, client)
 end
 
+defmodule EXLA.CustomCall.Builtins do
+  @moduledoc false
+
+  @doc """
+  Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.qr/2`, or `:skip`.
+
+  `operand_type` is the input matrix element type; `q_output_type` is the
+  element type of the `Q` factor from the block output template.
+  """
+  def qr_cpu_target(operand_type, q_output_type) do
+    case {operand_type, q_output_type} do
+      {{:f, 32}, {:f, 32}} -> "qr_cpu_custom_call_f32"
+      {{:f, 64}, {:f, 64}} -> "qr_cpu_custom_call_f64"
+      {{:f, 16}, {:f, 16}} -> "qr_cpu_custom_call_f16"
+      {{:bf, 16}, {:bf, 16}} -> "qr_cpu_custom_call_bf16"
+      {{:s, 8}, {:f, 32}} -> "qr_cpu_custom_call_s8"
+      {{:s, 16}, {:f, 32}} -> "qr_cpu_custom_call_s16"
+      {{:s, 32}, {:f, 32}} -> "qr_cpu_custom_call_s32"
+      {{:s, 64}, {:f, 32}} -> "qr_cpu_custom_call_s64"
+      {{:u, 8}, {:f, 32}} -> "qr_cpu_custom_call_u8"
+      {{:u, 16}, {:f, 32}} -> "qr_cpu_custom_call_u16"
+      {{:u, 32}, {:f, 32}} -> "qr_cpu_custom_call_u32"
+      {{:u, 64}, {:f, 32}} -> "qr_cpu_custom_call_u64"
+      _ -> :skip
+    end
+  end
+
+  @doc """
+  Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.eigh/2`, or `:skip`.
+
+  `operand_type` is the input matrix element type; `computation_type` is the
+  floating type used for eigenvalues and eigenvectors (same rule as
+  `Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})` in the protocol).
+  Integer operands are promoted to that float inside the native handler.
+  """
+  def eigh_cpu_target(operand_type, computation_type) do
+    case {operand_type, computation_type} do
+      {{:f, 32}, {:f, 32}} -> "eigh_cpu_custom_call_f32"
+      {{:f, 64}, {:f, 64}} -> "eigh_cpu_custom_call_f64"
+      {{:s, 8}, {:f, 32}} -> "eigh_cpu_custom_call_s8"
+      {{:s, 16}, {:f, 32}} -> "eigh_cpu_custom_call_s16"
+      {{:s, 32}, {:f, 32}} -> "eigh_cpu_custom_call_s32"
+      {{:s, 64}, {:f, 32}} -> "eigh_cpu_custom_call_s64"
+      {{:u, 8}, {:f, 32}} -> "eigh_cpu_custom_call_u8"
+      {{:u, 16}, {:f, 32}} -> "eigh_cpu_custom_call_u16"
+      {{:u, 32}, {:f, 32}} -> "eigh_cpu_custom_call_u32"
+      {{:u, 64}, {:f, 32}} -> "eigh_cpu_custom_call_u64"
+      _ -> :skip
+    end
+  end
+end
+
 # Default EXLA lowerings for **C-backed custom_call** `Nx.block/4` tags live
 # in this `defimpl ..., for: Any` module. With `@fallback_to_any true` on the
 # protocol, applications and libraries can define their own
@@ -106,38 +158,26 @@ defimpl EXLA.CustomCall, for: Any do
 
   def function_name(
         %Nx.Block.LinAlg.QR{},
-        {%{type: {q_type_kind, q_size}}, _r_expr},
-        [_tensor],
+        {%{type: q_type}, _r_expr},
+        [%{type: in_type} | _],
         %{platform: :host}
       )
-      when q_type_kind != :c do
-    case {q_type_kind, q_size} do
-      {:f, 32} -> "qr_cpu_custom_call_f32"
-      {:f, 64} -> "qr_cpu_custom_call_f64"
-      {:f, 16} -> "qr_cpu_custom_call_f16"
-      {:bf, 16} -> "qr_cpu_custom_call_bf16"
-      _ -> :skip
-    end
+      when elem(q_type, 0) != :c and elem(in_type, 0) != :c do
+    EXLA.CustomCall.Builtins.qr_cpu_target(in_type, q_type)
   end
 
   def function_name(
         %Nx.Block.LinAlg.Eigh{},
-        {%{type: {eval_type_kind, _}}, %{type: {evec_type_kind, evec_type_size}}},
-        [_tensor],
+        {%{type: eval_type}, %{type: evec_type}},
+        [%{type: in_type} | _],
         %{platform: :host}
       )
-      when eval_type_kind != :c and evec_type_kind != :c do
-    out_type =
-      Nx.Type.merge(
-        Nx.Type.to_floating({evec_type_kind, evec_type_size}),
-        {:f, 32}
-      )
+      when elem(eval_type, 0) != :c and elem(evec_type, 0) != :c and
+             elem(in_type, 0) != :c do
+    computation_type =
+      Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})
 
-    case out_type do
-      {:f, 32} -> "eigh_cpu_custom_call_f32"
-      {:f, 64} -> "eigh_cpu_custom_call_f64"
-      _ -> :skip
-    end
+    EXLA.CustomCall.Builtins.eigh_cpu_target(in_type, computation_type)
   end
 
   def function_name(_, _, _, _), do: :skip
