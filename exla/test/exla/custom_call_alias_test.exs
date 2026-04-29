@@ -26,7 +26,7 @@ defmodule EXLA.CustomCallAliasTest do
     end
   end
 
-  @plugin_relative ~c"test/exla_qr_alias_plugin.so"
+  @plugin_relative ~c"test/exla_qr_alias.so"
 
   defp plugin_path do
     :filename.join(:code.priv_dir(:exla), @plugin_relative)
@@ -53,17 +53,17 @@ defmodule EXLA.CustomCallAliasTest do
 
     unless File.exists?(path) do
       flunk("""
-      Missing #{path}. Build EXLA with MIX_ENV=test so the alias plugin is compiled \
-      (see Makefile target exla_qr_alias_plugin.so).
+      Missing #{path}. Build EXLA with MIX_ENV=test so the alias dylib is compiled \
+      (see Makefile target exla_qr_alias.so).
       """)
     end
 
-    case EXLA.NIF.dlopen_test_plugin(path) do
+    case EXLA.NIF.load_dylib(path) do
       :ok ->
         :ok
 
       other ->
-        flunk("dlopen_test_plugin(#{path}) expected :ok, got: #{inspect(other)}")
+        flunk("load_dylib(#{path}) expected :ok, got: #{inspect(other)}")
     end
   end
 

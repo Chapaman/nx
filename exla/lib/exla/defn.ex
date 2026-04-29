@@ -734,11 +734,35 @@ defmodule EXLA.Defn do
        ) do
     {call_args, cache} = Enum.map_reduce(in_args, cache, &recur_operator(&1, state, &2))
 
-    case EXLA.CustomCall.call(struct, out, call_args, client) do
+    case EXLA.CustomCall.function_name(struct, out, in_args, client) do
       :skip ->
         default_block_implementation(struct, call_args, out, state, cache)
 
-      lowered ->
+      function_name ->
+        config = EXLA.CustomCall.config(struct, out, in_args, client)
+
+        backend_config =
+          case config do
+            nil ->
+              nil
+
+            %{} = map ->
+              map
+
+            other ->
+              raise ArgumentError,
+                    "EXLA.CustomCall.config/4 must return map() | nil, got: #{inspect(other)}"
+          end
+
+        out_typespecs =
+          [out]
+          |> Composite.flatten_list()
+          |> Enum.map(&expr_to_typespec/1)
+
+        lowered =
+          Value.custom_call(call_args, out_typespecs, function_name, backend_config)
+          |> wrap_tuple_result(out)
+
         {lowered, cache}
     end
   end

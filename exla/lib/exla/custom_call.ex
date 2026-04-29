@@ -11,12 +11,15 @@ defprotocol EXLA.CustomCall do
 
   During compilation with `compiler: EXLA`, when the builder is an MLIR
   `EXLA.MLIR.Function`, each `Nx.block(tag, inputs, outputs, fn ... end)` is
-  passed here: `EXLA.Defn` invokes `call(tag, outputs_template, lowered_inputs, client)`.
+  passed here. `EXLA.Defn` invokes:
 
-  If `call/4` returns `:skip`, EXLA compiles the block's **default callback**
-  (the anonymous function body) instead of emitting a custom call.
+    * `function_name(tag, outputs_template, input_templates, client)`
+    * `config(tag, outputs_template, input_templates, client)`
 
-  ## `call/4` arguments
+  If `function_name/4` returns `:skip`, EXLA compiles the block's **default
+  callback** (the anonymous function body) instead of emitting a custom call.
+
+  ## `function_name/4` and `config/4` arguments
 
     * `struct` — the **tag** passed as the first argument to `Nx.block/4`
       (your own `defstruct` or an existing tag such as `%Nx.Block.LinAlg.QR{}`).
@@ -24,20 +27,23 @@ defprotocol EXLA.CustomCall do
     * `out` — the **output template** tuple passed to `Nx.block/4` (expression
       metadata for shapes and types, not runtime tensors).
 
-    * `args` — list of already-lowered **operands** as `EXLA.MLIR.Value`s, in
-      the same order as `inputs` in `Nx.block/4`.
+    * `args` — list of **input templates**, in the same order as `inputs` in
+      `Nx.block/4`.
 
     * `client` — the active `EXLA.Client` (use e.g. `client.platform` to gate
       host-only lowerings).
 
-  ## Return value
+  ## Return values
 
-    * **Success** — return a list of `EXLA.MLIR.Value` (or a single value) that
-      matches the block result shape implied by `out`.
+    * `function_name/4`:
+      * **Success** — return the native custom-call target name.
+      * **`:skip`** — this implementation does not apply (unsupported type,
+        non-host platform, wrong arity, etc.). The default block implementation
+        is used instead.
 
-    * **`:skip`** — this implementation does not apply (unsupported type,
-      non-host platform, wrong arity, etc.). The default block implementation is
-      used instead.
+    * `config/4`:
+      * Return a `map()` to be encoded as `backend_config`.
+      * Return `nil` to omit `backend_config`.
 
   ## Dispatch
 
@@ -61,24 +67,14 @@ defprotocol EXLA.CustomCall do
       end
 
       defimpl EXLA.CustomCall, for: MyApp.CustomQrTag do
-        alias EXLA.Defn
-        alias EXLA.MLIR.Value
-
-        def call(_tag, {q_expr, r_expr}, [tensor], %{platform: :host}) do
-          tensor =
-            if Defn.op_type(tensor) != q_expr.type do
-              Defn.to_type(tensor, q_expr.type)
-            else
-              tensor
-            end
-
-          {q, r} =
-            Value.qr(tensor, Defn.expr_to_typespec(q_expr), Defn.expr_to_typespec(r_expr))
-
-          [q, r]
+        def function_name(_tag, {%{type: {kind, size}}, _r_expr}, [_input], %{platform: :host})
+            when kind != :c and kind in [:f, :bf] and size in [16, 32, 64] do
+          "my_custom_qr_target"
         end
 
-        def call(_, _, _, _), do: :skip
+        def function_name(_, _, _, _), do: :skip
+
+        def config(_, _, _, _), do: nil
       end
 
   Then use `Nx.block(%MyApp.CustomQrTag{}, ...)` inside a `defn` compiled with
@@ -88,16 +84,14 @@ defprotocol EXLA.CustomCall do
   @fallback_to_any true
 
   @doc """
-  Attempts to lower the block natively.
-
-  Returns a list of `EXLA.MLIR.Value`s (or a single value) that represents the
-  block result, matching the shape of `out`.
-
-  Returns `:skip` when this implementation does not apply (wrong types,
-  platform, arity, etc.). `EXLA.Defn` then compiles the block's default callback
-  instead.
+  Returns the custom-call target name or `:skip`.
   """
-  def call(struct, out, args, client)
+  def function_name(struct, out, args, client)
+
+  @doc """
+  Returns a map encoded into `backend_config`, or `nil`.
+  """
+  def config(struct, out, args, client)
 end
 
 # Default EXLA lowerings for **C-backed custom_call** `Nx.block/4` tags live
@@ -110,55 +104,43 @@ end
 defimpl EXLA.CustomCall, for: Any do
   @moduledoc false
 
-  alias EXLA.MLIR.Value
-  alias EXLA.Defn
-
-  def call(%Nx.Block.LinAlg.QR{}, {%{type: {q_type_kind, _}} = q_expr, r_expr}, [tensor], client)
-      when q_type_kind != :c and client.platform == :host do
-    tensor =
-      if Defn.op_type(tensor) != q_expr.type do
-        Defn.to_type(tensor, q_expr.type)
-      else
-        tensor
-      end
-
-    {q, r} = Value.qr(tensor, Defn.expr_to_typespec(q_expr), Defn.expr_to_typespec(r_expr))
-    [q, r]
+  def function_name(
+        %Nx.Block.LinAlg.QR{},
+        {%{type: {q_type_kind, q_size}}, _r_expr},
+        [_tensor],
+        %{platform: :host}
+      )
+      when q_type_kind != :c do
+    case {q_type_kind, q_size} do
+      {:f, 32} -> "qr_cpu_custom_call_f32"
+      {:f, 64} -> "qr_cpu_custom_call_f64"
+      {:f, 16} -> "qr_cpu_custom_call_f16"
+      {:bf, 16} -> "qr_cpu_custom_call_bf16"
+      _ -> :skip
+    end
   end
 
-  def call(
+  def function_name(
         %Nx.Block.LinAlg.Eigh{},
-        {%{type: {eval_type_kind, _}} = eigenvals_expr,
-         %{type: {evec_type_kind, _}} = eigenvecs_expr},
-        [tensor],
-        client
+        {%{type: {eval_type_kind, _}}, %{type: {evec_type_kind, evec_type_size}}},
+        [_tensor],
+        %{platform: :host}
       )
-      when eval_type_kind != :c and evec_type_kind != :c and client.platform == :host do
-    # Eigen only supports f32/f64, so promote to the smallest floating type
-    # wide enough to represent the requested output.
-    out_type = Nx.Type.merge(Nx.Type.to_floating(eigenvecs_expr.type), {:f, 32})
-
-    tensor =
-      if Defn.op_type(tensor) != out_type do
-        Defn.to_type(tensor, out_type)
-      else
-        tensor
-      end
-
-    {eigenvals, eigenvecs} =
-      Value.eigh(
-        tensor,
-        Defn.expr_to_typespec(%{eigenvals_expr | type: out_type}),
-        Defn.expr_to_typespec(%{eigenvecs_expr | type: out_type})
+      when eval_type_kind != :c and evec_type_kind != :c do
+    out_type =
+      Nx.Type.merge(
+        Nx.Type.to_floating({evec_type_kind, evec_type_size}),
+        {:f, 32}
       )
 
-    [
-      Defn.to_type(eigenvals, eigenvals_expr.type),
-      Defn.to_type(eigenvecs, eigenvecs_expr.type)
-    ]
+    case out_type do
+      {:f, 32} -> "eigh_cpu_custom_call_f32"
+      {:f, 64} -> "eigh_cpu_custom_call_f64"
+      _ -> :skip
+    end
   end
 
-  def call(%Nx.Block.LinAlg.QR{}, _, _, _), do: :skip
-  def call(%Nx.Block.LinAlg.Eigh{}, _, _, _), do: :skip
-  def call(_, _, _, _), do: :skip
+  def function_name(_, _, _, _), do: :skip
+
+  def config(_, _, _, _), do: nil
 end
