@@ -719,62 +719,6 @@ defmodule EXLA.MLIR.Value do
     op(func, "stablehlo.return", values, [])
   end
 
-  def eigh(
-        %Value{function: func} = value,
-        %{type: eval_type} = eigenvals_typespec,
-        %{type: evec_type} = eigenvecs_typespec
-      ) do
-    %{type: op_type} = get_typespec(value)
-
-    operands = [value]
-    result_types = typespecs_to_mlir_types([eigenvals_typespec, eigenvecs_typespec])
-
-    call_target_name =
-      case EXLA.CustomCall.Builtins.eigh_cpu_target(op_type) do
-        :skip ->
-          raise "Eigh decomposition not supported on :host device for operand type #{inspect(op_type)}, eigenvalue type #{inspect(eval_type)}, eigenvector type #{inspect(evec_type)}"
-
-        name when is_binary(name) ->
-          name
-      end
-
-    attributes = [
-      call_target_name: attr_string(call_target_name),
-      api_version: attr_i32(4)
-    ]
-
-    [eigenvals, eigenvecs] =
-      op(func, "stablehlo.custom_call", operands, result_types, attributes: attributes)
-
-    {eigenvals, eigenvecs}
-  end
-
-  def qr(%Value{function: func} = value, %{type: q_type} = q_typespec, r_typespec) do
-    %{type: op_type} = get_typespec(value)
-
-    operands = [value]
-    result_types = typespecs_to_mlir_types([q_typespec, r_typespec])
-
-    call_target_name =
-      case EXLA.CustomCall.Builtins.qr_cpu_target(op_type) do
-        :skip ->
-          raise "QR decomposition not supported on :host device for operand type #{inspect(op_type)} and Q type #{inspect(q_type)}"
-
-        name when is_binary(name) ->
-          name
-      end
-
-    attributes = [
-      call_target_name: attr_string(call_target_name),
-      api_version: attr_i32(4)
-    ]
-
-    [q, r] =
-      op(func, "stablehlo.custom_call", operands, result_types, attributes: attributes)
-
-    {q, r}
-  end
-
   @doc false
   def custom_call(
         [%Value{function: func} | _] = operands,
