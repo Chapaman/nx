@@ -729,10 +729,8 @@ defmodule EXLA.MLIR.Value do
     operands = [value]
     result_types = typespecs_to_mlir_types([eigenvals_typespec, eigenvecs_typespec])
 
-    computation_type = Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})
-
     call_target_name =
-      case EXLA.CustomCall.Builtins.eigh_cpu_target(op_type, computation_type) do
+      case EXLA.CustomCall.Builtins.eigh_cpu_target(op_type) do
         :skip ->
           raise "Eigh decomposition not supported on :host device for operand type #{inspect(op_type)}, eigenvalue type #{inspect(eval_type)}, eigenvector type #{inspect(evec_type)}"
 
@@ -758,7 +756,7 @@ defmodule EXLA.MLIR.Value do
     result_types = typespecs_to_mlir_types([q_typespec, r_typespec])
 
     call_target_name =
-      case EXLA.CustomCall.Builtins.qr_cpu_target(op_type, q_type) do
+      case EXLA.CustomCall.Builtins.qr_cpu_target(op_type) do
         :skip ->
           raise "QR decomposition not supported on :host device for operand type #{inspect(op_type)} and Q type #{inspect(q_type)}"
 

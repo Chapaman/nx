@@ -100,23 +100,22 @@ defmodule EXLA.CustomCall.Builtins do
   @doc """
   Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.qr/2`, or `:skip`.
 
-  `operand_type` is the input matrix element type; `q_output_type` is the
-  element type of the `Q` factor from the block output template.
+  `operand_type` is the input matrix element type.
   """
-  def qr_cpu_target(operand_type, q_output_type) do
-    case {operand_type, q_output_type} do
-      {{:f, 32}, {:f, 32}} -> "qr_cpu_custom_call_f32"
-      {{:f, 64}, {:f, 64}} -> "qr_cpu_custom_call_f64"
-      {{:f, 16}, {:f, 16}} -> "qr_cpu_custom_call_f16"
-      {{:bf, 16}, {:bf, 16}} -> "qr_cpu_custom_call_bf16"
-      {{:s, 8}, {:f, 32}} -> "qr_cpu_custom_call_s8"
-      {{:s, 16}, {:f, 32}} -> "qr_cpu_custom_call_s16"
-      {{:s, 32}, {:f, 32}} -> "qr_cpu_custom_call_s32"
-      {{:s, 64}, {:f, 32}} -> "qr_cpu_custom_call_s64"
-      {{:u, 8}, {:f, 32}} -> "qr_cpu_custom_call_u8"
-      {{:u, 16}, {:f, 32}} -> "qr_cpu_custom_call_u16"
-      {{:u, 32}, {:f, 32}} -> "qr_cpu_custom_call_u32"
-      {{:u, 64}, {:f, 32}} -> "qr_cpu_custom_call_u64"
+  def qr_cpu_target(operand_type) do
+    case operand_type do
+      {:f, 32} -> "qr_cpu_custom_call_f32"
+      {:f, 64} -> "qr_cpu_custom_call_f64"
+      {:f, 16} -> "qr_cpu_custom_call_f16"
+      {:bf, 16} -> "qr_cpu_custom_call_bf16"
+      {:s, 8} -> "qr_cpu_custom_call_s8"
+      {:s, 16} -> "qr_cpu_custom_call_s16"
+      {:s, 32} -> "qr_cpu_custom_call_s32"
+      {:s, 64} -> "qr_cpu_custom_call_s64"
+      {:u, 8} -> "qr_cpu_custom_call_u8"
+      {:u, 16} -> "qr_cpu_custom_call_u16"
+      {:u, 32} -> "qr_cpu_custom_call_u32"
+      {:u, 64} -> "qr_cpu_custom_call_u64"
       _ -> :skip
     end
   end
@@ -124,23 +123,20 @@ defmodule EXLA.CustomCall.Builtins do
   @doc """
   Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.eigh/2`, or `:skip`.
 
-  `operand_type` is the input matrix element type; `computation_type` is the
-  floating type used for eigenvalues and eigenvectors (same rule as
-  `Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})` in the protocol).
-  Integer operands are promoted to that float inside the native handler.
+  `operand_type` is the input matrix element type.
   """
-  def eigh_cpu_target(operand_type, computation_type) do
-    case {operand_type, computation_type} do
-      {{:f, 32}, {:f, 32}} -> "eigh_cpu_custom_call_f32"
-      {{:f, 64}, {:f, 64}} -> "eigh_cpu_custom_call_f64"
-      {{:s, 8}, {:f, 32}} -> "eigh_cpu_custom_call_s8"
-      {{:s, 16}, {:f, 32}} -> "eigh_cpu_custom_call_s16"
-      {{:s, 32}, {:f, 32}} -> "eigh_cpu_custom_call_s32"
-      {{:s, 64}, {:f, 32}} -> "eigh_cpu_custom_call_s64"
-      {{:u, 8}, {:f, 32}} -> "eigh_cpu_custom_call_u8"
-      {{:u, 16}, {:f, 32}} -> "eigh_cpu_custom_call_u16"
-      {{:u, 32}, {:f, 32}} -> "eigh_cpu_custom_call_u32"
-      {{:u, 64}, {:f, 32}} -> "eigh_cpu_custom_call_u64"
+  def eigh_cpu_target(operand_type) do
+    case operand_type do
+      {:f, 32} -> "eigh_cpu_custom_call_f32"
+      {:f, 64} -> "eigh_cpu_custom_call_f64"
+      {:s, 8} -> "eigh_cpu_custom_call_s8"
+      {:s, 16} -> "eigh_cpu_custom_call_s16"
+      {:s, 32} -> "eigh_cpu_custom_call_s32"
+      {:s, 64} -> "eigh_cpu_custom_call_s64"
+      {:u, 8} -> "eigh_cpu_custom_call_u8"
+      {:u, 16} -> "eigh_cpu_custom_call_u16"
+      {:u, 32} -> "eigh_cpu_custom_call_u32"
+      {:u, 64} -> "eigh_cpu_custom_call_u64"
       _ -> :skip
     end
   end
@@ -163,7 +159,7 @@ defimpl EXLA.CustomCall, for: Any do
         %{platform: :host}
       )
       when elem(q_type, 0) != :c and elem(in_type, 0) != :c do
-    EXLA.CustomCall.Builtins.qr_cpu_target(in_type, q_type)
+    EXLA.CustomCall.Builtins.qr_cpu_target(in_type)
   end
 
   def function_name(
@@ -174,10 +170,7 @@ defimpl EXLA.CustomCall, for: Any do
       )
       when elem(eval_type, 0) != :c and elem(evec_type, 0) != :c and
              elem(in_type, 0) != :c do
-    computation_type =
-      Nx.Type.merge(Nx.Type.to_floating(evec_type), {:f, 32})
-
-    EXLA.CustomCall.Builtins.eigh_cpu_target(in_type, computation_type)
+    EXLA.CustomCall.Builtins.eigh_cpu_target(in_type)
   end
 
   def function_name(_, _, _, _), do: :skip
