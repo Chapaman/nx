@@ -33,7 +33,7 @@ defmodule EXLA.MixProject do
           "FINE_INCLUDE_DIR" => Fine.include_dir(),
           "MIX_BUILD_EMBEDDED" => "#{Mix.Project.config()[:build_embedded]}",
           "CWD_RELATIVE_TO_PRIV_PATH" => cwd_relative_to_priv,
-          "EXLA_VERSION" => "#{@version}",
+          "EXLA_VERSION" => "#{@version}"
         }
       end,
       make_args: make_args
