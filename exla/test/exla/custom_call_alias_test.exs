@@ -75,6 +75,14 @@ defmodule EXLA.CustomCallAliasTest do
     refute mlir =~ "qr_cpu_custom_call_f32_exla_alias"
   end
 
+  test "builtin QR lowering includes qr_cpu_custom_call_s32 in MLIR" do
+    arg = Nx.iota({3, 4}, type: {:s, 32})
+    assert %{mlir_module: mlir} = mlir_via_jit_apply!(&BuiltinFun.qr/1, [arg])
+
+    assert mlir =~ "@qr_cpu_custom_call_s32("
+    refute mlir =~ "qr_cpu_custom_call_f32_exla_alias"
+  end
+
   test "QR alias plugin: MLIR uses alias name and not the builtin target string" do
     load_plugin!()
 

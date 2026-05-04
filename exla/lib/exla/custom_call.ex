@@ -94,54 +94,6 @@ defprotocol EXLA.CustomCall do
   def config(struct, out, args, client)
 end
 
-defmodule EXLA.CustomCall.Builtins do
-  @moduledoc false
-
-  @doc """
-  Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.qr/2`, or `:skip`.
-
-  `operand_type` is the input matrix element type.
-  """
-  def qr_cpu_target(operand_type) do
-    case operand_type do
-      {:f, 32} -> "qr_cpu_custom_call_f32"
-      {:f, 64} -> "qr_cpu_custom_call_f64"
-      {:f, 16} -> "qr_cpu_custom_call_f16"
-      {:bf, 16} -> "qr_cpu_custom_call_bf16"
-      {:s, 8} -> "qr_cpu_custom_call_s8"
-      {:s, 16} -> "qr_cpu_custom_call_s16"
-      {:s, 32} -> "qr_cpu_custom_call_s32"
-      {:s, 64} -> "qr_cpu_custom_call_s64"
-      {:u, 8} -> "qr_cpu_custom_call_u8"
-      {:u, 16} -> "qr_cpu_custom_call_u16"
-      {:u, 32} -> "qr_cpu_custom_call_u32"
-      {:u, 64} -> "qr_cpu_custom_call_u64"
-      _ -> :skip
-    end
-  end
-
-  @doc """
-  Host CPU `stablehlo.custom_call` target for `Nx.LinAlg.eigh/2`, or `:skip`.
-
-  `operand_type` is the input matrix element type.
-  """
-  def eigh_cpu_target(operand_type) do
-    case operand_type do
-      {:f, 32} -> "eigh_cpu_custom_call_f32"
-      {:f, 64} -> "eigh_cpu_custom_call_f64"
-      {:s, 8} -> "eigh_cpu_custom_call_s8"
-      {:s, 16} -> "eigh_cpu_custom_call_s16"
-      {:s, 32} -> "eigh_cpu_custom_call_s32"
-      {:s, 64} -> "eigh_cpu_custom_call_s64"
-      {:u, 8} -> "eigh_cpu_custom_call_u8"
-      {:u, 16} -> "eigh_cpu_custom_call_u16"
-      {:u, 32} -> "eigh_cpu_custom_call_u32"
-      {:u, 64} -> "eigh_cpu_custom_call_u64"
-      _ -> :skip
-    end
-  end
-end
-
 # Default EXLA lowerings for **C-backed custom_call** `Nx.block/4` tags live
 # in this `defimpl ..., for: Any` module. With `@fallback_to_any true` on the
 # protocol, applications and libraries can define their own
@@ -159,7 +111,21 @@ defimpl EXLA.CustomCall, for: Any do
         %{platform: :host}
       )
       when elem(q_type, 0) != :c and elem(in_type, 0) != :c do
-    EXLA.CustomCall.Builtins.qr_cpu_target(in_type)
+    case in_type do
+      {:f, 32} -> "qr_cpu_custom_call_f32"
+      {:f, 64} -> "qr_cpu_custom_call_f64"
+      {:f, 16} -> "qr_cpu_custom_call_f16"
+      {:bf, 16} -> "qr_cpu_custom_call_bf16"
+      {:s, 8} -> "qr_cpu_custom_call_s8"
+      {:s, 16} -> "qr_cpu_custom_call_s16"
+      {:s, 32} -> "qr_cpu_custom_call_s32"
+      {:s, 64} -> "qr_cpu_custom_call_s64"
+      {:u, 8} -> "qr_cpu_custom_call_u8"
+      {:u, 16} -> "qr_cpu_custom_call_u16"
+      {:u, 32} -> "qr_cpu_custom_call_u32"
+      {:u, 64} -> "qr_cpu_custom_call_u64"
+      _ -> :skip
+    end
   end
 
   def function_name(
@@ -170,7 +136,19 @@ defimpl EXLA.CustomCall, for: Any do
       )
       when elem(eval_type, 0) != :c and elem(evec_type, 0) != :c and
              elem(in_type, 0) != :c do
-    EXLA.CustomCall.Builtins.eigh_cpu_target(in_type)
+    case in_type do
+      {:f, 32} -> "eigh_cpu_custom_call_f32"
+      {:f, 64} -> "eigh_cpu_custom_call_f64"
+      {:s, 8} -> "eigh_cpu_custom_call_s8"
+      {:s, 16} -> "eigh_cpu_custom_call_s16"
+      {:s, 32} -> "eigh_cpu_custom_call_s32"
+      {:s, 64} -> "eigh_cpu_custom_call_s64"
+      {:u, 8} -> "eigh_cpu_custom_call_u8"
+      {:u, 16} -> "eigh_cpu_custom_call_u16"
+      {:u, 32} -> "eigh_cpu_custom_call_u32"
+      {:u, 64} -> "eigh_cpu_custom_call_u64"
+      _ -> :skip
+    end
   end
 
   def function_name(_, _, _, _), do: :skip
