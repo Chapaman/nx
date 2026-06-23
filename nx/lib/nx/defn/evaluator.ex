@@ -443,5 +443,4 @@ defmodule Nx.Defn.Evaluator do
 
   defp resolve_io_call({:fn, fun}, _io_calls), do: fun
   defp resolve_io_call({:named, name, callback}, io_calls), do: io_calls[name] || callback
-
 end
